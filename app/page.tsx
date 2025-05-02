@@ -1,4 +1,3 @@
-// app/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -20,31 +19,35 @@ const MODELS = [
 export default function Home() {
   const [model, setModel] = useState('sonar');
   const [query, setQuery] = useState('');
-  const [response, setResponse] = useState<any>(null);
+  const [response, setResponse] = useState<any[]>([]); // Array to store the conversation
   const [loading, setLoading] = useState(false);
   const [image, setImage] = useState<File | null>(null);
 
   const handleSubmit = async () => {
     setLoading(true);
     try {
-      const formData = new FormData();
-      formData.append('model', model);
-      formData.append('query', query);
-      if (image) formData.append('image', image);
-
       const res = await fetch('/api/ask', {
         method: 'POST',
-        body: formData,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ model, query }),
       });
 
-      if (!res.ok) {
-        throw new Error(`API error: ${res.status}`);
-      }
-
+      if (!res.ok) throw new Error(`API error: ${res.status}`);
       const data = await res.json();
-      setResponse(data);
+      setResponse((prevResponse) => [
+        ...prevResponse,
+        { role: 'user', content: query },
+        { role: 'assistant', content: data.answer, thinking: data.thinking },
+      ]);
+      setQuery('');
     } catch (error) {
-      setResponse({ thinking: 'Error', answer: String(error), code: null });
+      setResponse((prevResponse) => [
+        ...prevResponse,
+        { role: 'user', content: query },
+        { role: 'assistant', content: `Error: ${error}`, thinking: 'Error' },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -52,7 +55,7 @@ export default function Home() {
 
   return (
     <main className="max-w-3xl mx-auto p-6 space-y-4">
-      <h1 className="text-2xl font-bold">Perplexity AI Client</h1>
+      <h1 className="text-2xl font-bold">AI Chatbot with Perplexity</h1>
       <Select onValueChange={setModel} value={model}>
         <SelectTrigger>
           <SelectValue placeholder="Select model" />
@@ -65,32 +68,31 @@ export default function Home() {
           ))}
         </SelectContent>
       </Select>
-      <Textarea
-        placeholder="Ask a question..."
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
-      <Input
-        type="file"
-        accept="image/*"
-        onChange={(e) => setImage(e.target.files?.[0] ?? null)}
-      />
-      <Button onClick={handleSubmit} disabled={loading || !query}>
-        {loading ? <LoaderCircle className="animate-spin" /> : 'Submit'}
-      </Button>
-      {response && (
-        <Card>
-          <CardContent className="p-4 space-y-2 whitespace-pre-wrap">
-            <div><strong>Thought:</strong> {response.thinking}</div>
-            <div><strong>Answer:</strong> {response.answer}</div>
-            {response.code && (
-              <pre className="bg-gray-100 p-2 rounded-md overflow-x-auto">
-                <code>{response.code}</code>
-              </pre>
+      <div className="space-y-4">
+        {response.map((message, idx) => (
+          <div key={idx} className={`message ${message.role === 'user' ? 'text-right' : 'text-left'}`}>
+            <div className={`p-2 rounded-md ${message.role === 'user' ? 'bg-blue-100' : 'bg-gray-100'}`}>
+              <strong>{message.role === 'user' ? 'You' : 'AI'}:</strong> {message.content}
+            </div>
+            {message.thinking && (
+              <div className="italic text-sm text-muted-foreground">
+                Thinking: {message.thinking}
+              </div>
             )}
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        ))}
+      </div>
+      <div className="flex space-x-4">
+        <Textarea
+          placeholder="Ask a question..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="flex-grow"
+        />
+        <Button onClick={handleSubmit} disabled={loading || !query}>
+          {loading ? <LoaderCircle className="animate-spin" /> : 'Send'}
+        </Button>
+      </div>
     </main>
   );
 }

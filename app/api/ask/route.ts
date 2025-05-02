@@ -1,37 +1,20 @@
-// app/api/ask/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import formidable from 'formidable';
-import { readFile } from 'fs/promises';
-import path from 'path';
-
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
 
 const PERPLEXITY_API_KEY = process.env.PERPLEXITY_API_KEY;
 
-async function parseForm(req: NextRequest): Promise<{ model: string; query: string; image?: Buffer }> {
-  return new Promise((resolve, reject) => {
-    const form = formidable({ multiples: false });
-    form.parse(req as any, async (err, fields, files) => {
-      if (err) return reject(err);
-      const model = fields.model?.[0] || 'sonar';
-      const query = fields.query?.[0] || '';
-      let imageBuffer: Buffer | undefined = undefined;
-      if (files.image) {
-        const imageFile = files.image[0];
-        imageBuffer = await readFile(imageFile.filepath);
-      }
-      resolve({ model, query, image: imageBuffer });
-    });
-  });
-}
+// Initialize an in-memory conversation context
+let conversationHistory: { role: string; content: string }[] = [];
 
 export async function POST(req: NextRequest) {
   try {
-    const { model, query, image } = await parseForm(req);
+    const body = await req.json();
+    const { model, query } = body;
+
+    // Add user query to conversation history
+    conversationHistory.push({ role: 'user', content: query });
+
+    // Prepare the messages for the Perplexity API
+    const messages = [...conversationHistory];
 
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
       method: 'POST',
@@ -41,13 +24,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model,
-        messages: [
-          {
-            role: 'user',
-            content: query,
-          },
-        ],
-        ...(image && { image }),
+        messages,
       }),
     });
 
@@ -61,8 +38,19 @@ export async function POST(req: NextRequest) {
     const code = codeMatch ? codeMatch[1] : null;
     const answer = content.replace(/```[a-z]*\n([\s\S]*?)```/, '').trim();
 
-    return NextResponse.json({ thinking: 'Processed via Perplexity', answer, code });
+    // Add AI response to the conversation history
+    conversationHistory.push({ role: 'assistant', content: answer });
+
+    let thinking = 'Processed via Perplexity';
+    if (model === 'sonar-reasoning-pro') {
+      const match = content.match(/<think>([\s\S]*?)<\/think>/);
+      if (match) {
+        thinking = match[1].trim();
+      }
+    }
+
+    return NextResponse.json({ thinking, answer, code });
   } catch (err) {
     return NextResponse.json({ thinking: 'Error', answer: String(err), code: null }, { status: 500 });
   }
-} 
+}
